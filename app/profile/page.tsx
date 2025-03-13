@@ -11,6 +11,7 @@ import { format } from "date-fns"
 import { ptBR } from "date-fns/locale"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { getAuthToken } from "@/lib/get-jwt"
+import Navbar from "@/components/navbar"
 
 interface UserProfile {
   id: string
@@ -135,7 +136,9 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="container mx-auto py-6 max-w-4xl">
+    <>
+    <Navbar />
+    <div className="container mx-auto py-20 max-w-4xl">
       <Card className="mb-6">
         <CardContent className="pt-6">
           <div className="flex flex-col items-center md:flex-row md:items-start gap-6">
@@ -266,6 +269,7 @@ export default function ProfilePage() {
         </Button>
       </div>
     </div>
+    </>
   )
 }
 

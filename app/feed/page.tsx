@@ -155,43 +155,6 @@ export default function FeedPage() {
             )}
           </main>
         </div>
-
-        {/* Mobile User Profile */}
-        <div className="md:hidden fixed bottom-0 right-0 m-4 z-50">
-          <button
-            onClick={() => setShowDropdown(!showDropdown)}
-            className="bg-[#3DD4A7] h-12 w-12 rounded-full flex items-center justify-center shadow-lg"
-          >
-            <div className="h-10 w-10 rounded-full bg-gray-300 flex items-center justify-center overflow-hidden border-2 border-white">
-              <img src="/placeholder.svg?height=40&width=40" alt="User" className="h-full w-full object-cover" />
-            </div>
-          </button>
-          {showDropdown && (
-            <div className="absolute right-0 bottom-14 w-48 bg-white rounded-md shadow-lg">
-              <div className="py-1">
-                <div className="px-4 py-2 border-b">
-                  <p className="text-sm font-medium">{username || "Usuário"}</p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Tipo:{" "}
-                    {userRole === "admin" ? "Administrador" : userRole === "client_admin" ? "Admin Cliente" : "Usuário"}
-                  </p>
-                </div>
-                <a href="#" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                  Perfil
-                </a>
-                <a href="#" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                  Configurações
-                </a>
-                <button
-                  onClick={handleLogout}
-                  className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100"
-                >
-                  Sair
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
       </div>
     </div>
   )

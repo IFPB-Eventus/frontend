@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useToast } from "@/components/ui/use-toast"
+import Link from "next/link"
 
 export default function LoginForm() {
   const [email, setEmail] = useState("")
@@ -117,9 +118,9 @@ export default function LoginForm() {
 
       <div className="mt-6 md:mt-8 text-center">
         <span className="text-gray-400">Não tem uma conta?</span>{" "}
-        <a href="#" className="text-[#3DD4A7] hover:underline ml-1">
+        <Link href={"/register"} className="text-[#3DD4A7] hover:underline ml-1">
           Sign up
-        </a>
+        </Link>
       </div>
     </div>
   )
