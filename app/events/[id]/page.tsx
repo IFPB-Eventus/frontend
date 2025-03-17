@@ -43,12 +43,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { getAuthToken } from "@/lib/get-jwt"
 import Navbar from "@/components/navbar"
 import { Separator } from "@/components/ui/separator"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { motion, AnimatePresence } from "framer-motion"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 interface PageProps {
   params: {
@@ -74,6 +74,12 @@ export default function EventDetailsPage({ params }: PageProps) {
   const [searchQuery, setSearchQuery] = useState("")
   const [isFavorite, setIsFavorite] = useState(false)
   const [showShareOptions, setShowShareOptions] = useState(false)
+  // Add a new state variable to track the user's registration ID
+  const [userRegistrationId, setUserRegistrationId] = useState<number | null>(null)
+  const [isCanceling, setIsCanceling] = useState(false)
+  const [showCancelDialog, setShowCancelDialog] = useState(false)
+  // Adicione um estado para rastrear o status da inscrição
+  const [registrationStatus, setRegistrationStatus] = useState<string>("PENDING")
 
   const router = useRouter()
   const { toast } = useToast()
@@ -106,12 +112,27 @@ export default function EventDetailsPage({ params }: PageProps) {
     }
   }, [params.id, router])
 
+  // Adicione uma função para verificar periodicamente o status da inscrição
+  useEffect(() => {
+    // Verificar o status da inscrição a cada 30 segundos se o usuário estiver inscrito
+    if (isRegistered && !checkingRegistration) {
+      const intervalId = setInterval(() => {
+        const token = getAuthToken()
+        if (token) {
+          checkRegistrationStatus(token)
+        }
+      }, 30000) // 30 segundos
+
+      return () => clearInterval(intervalId)
+    }
+  }, [isRegistered, checkingRegistration, params.id])
+
   // Add a function to check registration status
   const checkRegistrationStatus = async (token: string) => {
     setCheckingRegistration(true)
     try {
-      // Check event registration
-      const eventResponse = await fetch(`/api/events/${params.id}/check-registration`, {
+      // Buscar dados do evento que inclui as inscrições
+      const eventResponse = await fetch(`/api/events/${params.id}`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -119,34 +140,84 @@ export default function EventDetailsPage({ params }: PageProps) {
 
       if (eventResponse.ok) {
         const eventData = await eventResponse.json()
-        setIsRegistered(eventData.isRegistered)
-      }
 
-      // Check activities registration
-      if (event?.activities?.length) {
-        const registeredIds: number[] = []
+        // Obter informações do usuário do token
+        const decodedToken = decodeJwt(token)
+        const userId = decodedToken.sub
 
-        for (const activity of event.activities) {
-          const activityResponse = await fetch(`/api/activities/${activity.id}/check-registration`, {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          })
+        // Verificar se o usuário está na lista de registrations
+        const userRegistration = eventData.registrations?.find(
+          (reg: any) => reg.userId === userId && reg.registered === true,
+        )
 
-          if (activityResponse.ok) {
-            const activityData = await activityResponse.json()
-            if (activityData.isRegistered) {
-              registeredIds.push(activity.id)
-            }
-          }
+        setIsRegistered(!!userRegistration)
+
+        if (userRegistration) {
+          setUserRegistrationId(userRegistration.id)
+          // Como não temos informações detalhadas sobre o status, assumimos ACTIVE se registered for true
+          setRegistrationStatus(userRegistration.registered ? "ACTIVE" : "PENDING")
+        } else {
+          setUserRegistrationId(null)
+          setRegistrationStatus("PENDING")
         }
 
-        setRegisteredActivities(registeredIds)
+        // Para as atividades, como não temos a rota específica,
+        // podemos manter o estado atual ou implementar uma lógica baseada nos dados disponíveis
+        // Por enquanto, mantemos o array existente
       }
     } catch (error) {
       console.error("Erro ao verificar status de inscrição:", error)
     } finally {
       setCheckingRegistration(false)
+    }
+  }
+
+  // Add a function to handle cancellation of registration
+  const handleCancelRegistration = async () => {
+    setIsCanceling(true)
+    try {
+      const token = getAuthToken()
+
+      if (!token) {
+        router.push("/")
+        return
+      }
+
+      // Usar o ID do evento para cancelar a inscrição
+      const response = await fetch(`/api/event-registrations/${params.id}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "X-HTTP-Method-Override": "DELETE",
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error("Erro ao cancelar inscrição no evento.")
+      }
+
+      toast({
+        title: "Sucesso!",
+        description: "Sua inscrição foi cancelada com sucesso.",
+      })
+
+      // Update registration status
+      setIsRegistered(false)
+      setUserRegistrationId(null)
+      setShowCancelDialog(false)
+
+      // Also clear registered activities since the user is no longer registered for the event
+      setRegisteredActivities([])
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Erro",
+        description: error instanceof Error ? error.message : "Erro ao cancelar inscrição.",
+      })
+      console.error(error)
+    } finally {
+      setIsCanceling(false)
     }
   }
 
@@ -229,6 +300,7 @@ export default function EventDetailsPage({ params }: PageProps) {
     }
   }
 
+  // Modifique a função handleRegistration para atualizar o estado após a inscrição
   const handleRegistration = async () => {
     setIsRegistering(true)
 
@@ -252,6 +324,12 @@ export default function EventDetailsPage({ params }: PageProps) {
         throw new Error(data.error || "Erro ao se inscrever no evento.")
       }
 
+      // Obter o ID da inscrição da resposta
+      const data = await response.json()
+      if (data && data.id) {
+        setUserRegistrationId(data.id)
+      }
+
       toast({
         title: "Sucesso!",
         description: "Inscrição no evento realizada com sucesso.",
@@ -259,11 +337,18 @@ export default function EventDetailsPage({ params }: PageProps) {
 
       // Update registration status
       setIsRegistered(true)
+      setRegistrationStatus("ACTIVE")
+
+      // Atualizar os dados do evento após o registro
+      const token2 = getAuthToken()
+      if (token2) {
+        fetchEvent(token2)
+      }
     } catch (error) {
       toast({
         variant: "destructive",
         title: "Erro",
-        description: "Usuário já inscrito neste evento!",
+        description: error instanceof Error ? error.message : "Erro ao processar inscrição.",
       })
       console.error(error)
     } finally {
@@ -459,7 +544,7 @@ export default function EventDetailsPage({ params }: PageProps) {
       <Navbar />
 
       {/* Hero Section */}
-      <div className="relative py-14">
+      <div className="relative">
         <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/50 to-black/30 z-10"></div>
         <div
           className="h-[40vh] md:h-[60vh] w-full bg-cover bg-center"
@@ -475,7 +560,7 @@ export default function EventDetailsPage({ params }: PageProps) {
               {isRegistered && (
                 <Badge className="bg-green-500 hover:bg-green-500 text-white border-none">
                   <Check className="h-3 w-3 mr-1" />
-                  Inscrito
+                  {registrationStatus === "CONFIRMED" ? "Confirmado" : "Inscrito"}
                 </Badge>
               )}
             </div>
@@ -514,6 +599,26 @@ export default function EventDetailsPage({ params }: PageProps) {
                     <>
                       <TicketIcon className="mr-2 h-4 w-4" />
                       Inscrever-se
+                    </>
+                  )}
+                </Button>
+              )}
+              {(userRole === "user" || userRole === "client_user") && isRegistered && (
+                <Button
+                  onClick={() => setShowCancelDialog(true)}
+                  className="bg-red-500 hover:bg-red-600 text-white"
+                  disabled={isCanceling}
+                  size="lg"
+                >
+                  {isCanceling ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Cancelando...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Cancelar inscrição
                     </>
                   )}
                 </Button>
@@ -655,6 +760,13 @@ export default function EventDetailsPage({ params }: PageProps) {
                           "Inscrever-se" em cada atividade de seu interesse.
                         </AccordionContent>
                       </AccordionItem>
+                      <AccordionItem value="item-2">
+                        <AccordionTrigger>Posso cancelar minha inscrição?</AccordionTrigger>
+                        <AccordionContent>
+                          Sim, você pode cancelar sua inscrição a qualquer momento antes do início do evento. Basta
+                          acessar seu perfil e gerenciar suas inscrições.
+                        </AccordionContent>
+                      </AccordionItem>
                     </Accordion>
                   </div>
 
@@ -775,9 +887,13 @@ export default function EventDetailsPage({ params }: PageProps) {
                             <ChevronDown className="h-4 w-4 ml-2" />
                           </Button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-[200px]">
+                        <DropdownMenuContent className="w-[200px]" align="end">
                           {filterOptions.map((option) => (
                             <DropdownMenuItem
+                              className={cn(
+                                "cursor-pointer",
+                                activityFilter === option.value && "bg-[#e6f7f2] text-[#3DD4A7] font-medium",
+                              )}
                               key={option.value}
                               onClick={() => setActivityFilter(option.value)}
                               className={cn(
@@ -970,13 +1086,6 @@ export default function EventDetailsPage({ params }: PageProps) {
                             </motion.div>
                           ))}
                         </div>
-
-                        <div className="mt-6 flex justify-end">
-                          <Button variant="outline" className="gap-2">
-                            <Download className="h-4 w-4" />
-                            Exportar lista
-                          </Button>
-                        </div>
                       </div>
                     ) : (
                       <div className="text-center py-12 bg-gray-50 rounded-lg border">
@@ -1003,7 +1112,6 @@ export default function EventDetailsPage({ params }: PageProps) {
               >
                 <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
                   <h2 className="text-xl font-bold mb-4">Informações do evento</h2>
-
                   <div className="space-y-4">
                     <div className="flex items-start">
                       <div className="bg-[#e6f7f2] p-2 rounded-lg mr-3">
@@ -1046,71 +1154,71 @@ export default function EventDetailsPage({ params }: PageProps) {
                       </div>
                     </div>
                   </div>
-
                   <Separator className="my-6" />
-
                   <div className="space-y-4">
                     {(userRole === "user" || userRole === "client_user") && (
-                      <Button
-                        className="w-full bg-[#3DD4A7] hover:bg-[#2bc090] h-12 text-base"
-                        disabled={isRegistered || isRegistering || checkingRegistration}
-                        onClick={handleRegistration}
-                      >
-                        {checkingRegistration ? (
-                          <>
-                            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                            Verificando...
-                          </>
-                        ) : isRegistering ? (
-                          <>
-                            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                            Inscrevendo...
-                          </>
-                        ) : isRegistered ? (
-                          <>
-                            <Check className="mr-2 h-5 w-5" />
-                            Inscrito
-                          </>
+                      <>
+                        {!isRegistered ? (
+                          <Button
+                            className="w-full bg-[#3DD4A7] hover:bg-[#2bc090] h-12 text-base"
+                            disabled={isRegistering || checkingRegistration}
+                            onClick={handleRegistration}
+                          >
+                            {checkingRegistration ? (
+                              <>
+                                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                                Verificando...
+                              </>
+                            ) : isRegistering ? (
+                              <>
+                                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                                Inscrevendo...
+                              </>
+                            ) : (
+                              <>
+                                <TicketIcon className="mr-2 h-5 w-5" />
+                                Inscrever-se no evento
+                              </>
+                            )}
+                          </Button>
                         ) : (
-                          <>
-                            <TicketIcon className="mr-2 h-5 w-5" />
-                            Inscrever-se no evento
-                          </>
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between">
+                              <Badge className="bg-green-100 text-green-800 px-3 py-1 text-xs rounded-full">
+                                Inscrito
+                              </Badge>
+                              {userRegistrationId && (
+                                <span className="text-xs text-gray-500">ID: {userRegistrationId}</span>
+                              )}
+                            </div>
+                            <Button
+                              className="w-full bg-red-500 hover:bg-red-600 h-12 text-base text-white"
+                              disabled={isCanceling || checkingRegistration}
+                              onClick={() => setShowCancelDialog(true)}
+                            >
+                              {checkingRegistration ? (
+                                <>
+                                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                                  Verificando...
+                                </>
+                              ) : isCanceling ? (
+                                <>
+                                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                                  Cancelando...
+                                </>
+                              ) : (
+                                <>
+                                  <Trash2 className="mr-2 h-5 w-5" />
+                                  Cancelar inscrição
+                                </>
+                              )}
+                            </Button>
+                          </div>
                         )}
-                      </Button>
+                      </>
                     )}
                   </div>
                 </div>
-
-                {event.activities && event.activities.length > 0 && (
-                  <div className="bg-white rounded-xl shadow-sm p-6">
-                    <h2 className="text-xl font-bold mb-4">Estatísticas</h2>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="bg-gray-50 p-4 rounded-lg text-center">
-                        <p className="text-3xl font-bold text-[#3DD4A7]">{event.activities.length}</p>
-                        <p className="text-sm text-gray-600">Atividades</p>
-                      </div>
-
-                      <div className="bg-gray-50 p-4 rounded-lg text-center">
-                        <p className="text-3xl font-bold text-[#3DD4A7]">{event.registrations?.length || 0}</p>
-                        <p className="text-sm text-gray-600">Participantes</p>
-                      </div>
-
-                      <div className="bg-gray-50 p-4 rounded-lg text-center">
-                        <p className="text-3xl font-bold text-[#3DD4A7]">{registeredActivities.length}</p>
-                        <p className="text-sm text-gray-600">Suas inscrições</p>
-                      </div>
-
-                      <div className="bg-gray-50 p-4 rounded-lg text-center">
-                        <p className="text-3xl font-bold text-[#3DD4A7]">
-                          {Math.round(((event.registrations?.length || 0) / event.maxRegistrations) * 100)}%
-                        </p>
-                        <p className="text-sm text-gray-600">Ocupação</p>
-                      </div>
-                    </div>
-                  </div>
-                )}
               </motion.div>
             </div>
           </div>
@@ -1152,6 +1260,36 @@ export default function EventDetailsPage({ params }: PageProps) {
           <ArrowLeft className="h-5 w-5" />
         </Button>
       </div>
+
+      {/* Diálogo de confirmação para cancelar inscrição */}
+      <AlertDialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirmar cancelamento</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja cancelar sua inscrição neste evento? Esta ação não pode ser desfeita e você perderá
+              todas as suas inscrições em atividades.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isCanceling}>Voltar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleCancelRegistration}
+              disabled={isCanceling}
+              className="bg-red-500 hover:bg-red-600"
+            >
+              {isCanceling ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Cancelando...
+                </>
+              ) : (
+                "Confirmar cancelamento"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }

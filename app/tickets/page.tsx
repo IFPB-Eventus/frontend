@@ -207,16 +207,6 @@ export default function TicketsPage() {
                             <ExternalLink className="h-4 w-4 mr-2" />
                             Ver detalhes
                           </Button>
-
-                          <Button variant="outline" size="sm">
-                            <Download className="h-4 w-4 mr-2" />
-                            Baixar
-                          </Button>
-
-                          <Button variant="outline" size="sm">
-                            <Share2 className="h-4 w-4 mr-2" />
-                            Compartilhar
-                          </Button>
                         </div>
                       </div>
                     </div>
