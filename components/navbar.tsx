@@ -60,7 +60,6 @@ export default function Navbar() {
     }
   }, [router])
 
-  // Add scroll effect
   useEffect(() => {
     const handleScroll = () => {
       if (window.scrollY > 10) {
@@ -121,7 +120,6 @@ export default function Navbar() {
     },
   ]
 
-  // Filter nav items based on user role
   const filteredNavItems = navItems.filter((item) => item.roles.includes(userRole))
 
   return (
@@ -160,44 +158,7 @@ export default function Navbar() {
 
         {/* User Actions */}
         <div className="flex items-center space-x-2">
-          {/* Notifications */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="relative text-gray-300 hover:text-white hover:bg-white/10">
-                <Bell className="h-5 w-5" />
-                {notificationCount > 0 && (
-                  <Badge className="absolute -top-1 -right-1 h-5 w-5 p-0 flex items-center justify-center bg-[#3DD4A7] text-black">
-                    {notificationCount}
-                  </Badge>
-                )}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-80">
-              <DropdownMenuLabel>Notificações</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <div className="max-h-[300px] overflow-y-auto">
-                <div className="p-3 hover:bg-gray-100 cursor-pointer">
-                  <p className="font-medium text-sm">Novo evento disponível</p>
-                  <p className="text-xs text-gray-500">Workshop React - 10 minutos atrás</p>
-                </div>
-                <div className="p-3 hover:bg-gray-100 cursor-pointer">
-                  <p className="font-medium text-sm">Lembrete de evento</p>
-                  <p className="text-xs text-gray-500">Sertão Comp começa amanhã</p>
-                </div>
-                <div className="p-3 hover:bg-gray-100 cursor-pointer">
-                  <p className="font-medium text-sm">Presença confirmada</p>
-                  <p className="text-xs text-gray-500">Sua presença foi confirmada no evento</p>
-                </div>
-              </div>
-              <DropdownMenuSeparator />
-              <div className="p-2 text-center">
-                <Button variant="ghost" size="sm" className="text-[#3DD4A7] hover:text-[#3DD4A7] hover:bg-[#3DD4A7]/10">
-                  Ver todas
-                </Button>
-              </div>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
+        
           {/* User Profile */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -207,7 +168,7 @@ export default function Navbar() {
                 className="flex items-center space-x-2 text-gray-300 hover:text-white hover:bg-white/10"
               >
                 <Avatar className="h-8 w-8 border-2 border-[#3DD4A7]/50">
-                  <AvatarImage src="/placeholder.svg" />
+                  <AvatarImage src="/avatar.jpg" />
                   <AvatarFallback className="bg-[#3DD4A7]/20 text-[#3DD4A7]">
                     {getInitials(username || "User")}
                   </AvatarFallback>
@@ -227,10 +188,6 @@ export default function Navbar() {
               <DropdownMenuItem onClick={() => router.push("/profile")}>
                 <User className="h-4 w-4 mr-2" />
                 Perfil
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => router.push("/settings")}>
-                <Settings className="h-4 w-4 mr-2" />
-                Configurações
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleLogout} className="text-red-500 focus:text-red-500">

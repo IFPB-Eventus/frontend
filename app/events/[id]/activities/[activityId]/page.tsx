@@ -17,6 +17,7 @@ import { Badge } from "@/components/ui/badge"
 import { getAuthToken } from "@/lib/get-jwt"
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
+import Navbar from "@/components/navbar"
 
 interface Registration {
   id: number
@@ -283,7 +284,9 @@ export default function ActivityDetailsPage() {
   };
 
   return (
-    <div className="container mx-auto py-6 max-w-4xl">
+    <>
+    <Navbar />
+    <div className="container mx-auto py-24 max-w-4xl">
       <div className="flex items-center mb-6">
         <Button variant="ghost" size="icon" onClick={() => router.back()} className="mr-2">
           <ArrowLeft className="h-5 w-5" />
@@ -535,6 +538,7 @@ export default function ActivityDetailsPage() {
         </Card>
       )}
     </div>
+    </>
   )
 }
 

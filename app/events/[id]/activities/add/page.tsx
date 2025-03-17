@@ -16,6 +16,7 @@ import { useToast } from "@/components/ui/use-toast"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { getAuthToken } from "@/lib/get-jwt"
+import Navbar from "@/components/navbar"
 
 interface PageProps {
   params: {
@@ -149,7 +150,9 @@ export default function AddActivityPage({ params }: PageProps) {
   }
 
   return (
-    <div className="container max-w-3xl mx-auto py-6">
+    <>
+    <Navbar />
+    <div className="container max-w-3xl mx-auto py-24">
       <h1 className="text-3xl font-bold mb-6">Adicionar atividade ao evento</h1>
 
       <form onSubmit={handleSubmit} className="space-y-6">
@@ -329,6 +332,7 @@ export default function AddActivityPage({ params }: PageProps) {
         </div>
       </form>
     </div>
+    </>
   )
 }
 

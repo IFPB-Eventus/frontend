@@ -1,14 +1,12 @@
+import { Activity } from "./activity"
+
 export interface Registration {
   id: number
   userId: string
   userName: string
 }
 
-export interface Activity {
-  id: number
-  name: string
-  registrations: Registration[]
-}
+
 
 export interface Event {
   id: number

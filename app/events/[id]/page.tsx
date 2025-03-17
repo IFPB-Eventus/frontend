@@ -5,11 +5,29 @@ import { useRouter } from "next/navigation"
 import { decodeJwt } from "@/lib/jwt"
 import { useToast } from "@/components/ui/use-toast"
 import type { Event } from "@/types/event"
-import type { Activity } from "@/types/activity"
-import { formatDate } from "@/lib/utils"
+import { formatDate, cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { Calendar, Clock, MapPin, Plus, Users, Pencil, Trash2, ArrowLeft, Loader2, ExternalLink } from "lucide-react"
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Calendar,
+  Clock,
+  MapPin,
+  Plus,
+  Users,
+  Trash2,
+  ArrowLeft,
+  Loader2,
+  ExternalLink,
+  CalendarDays,
+  Check,
+  Share2,
+  Star,
+  TicketIcon,
+  Heart,
+  Download,
+  ChevronDown,
+  Filter,
+  Search,
+} from "lucide-react"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,6 +42,13 @@ import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { getAuthToken } from "@/lib/get-jwt"
 import Navbar from "@/components/navbar"
+import { Separator } from "@/components/ui/separator"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { Input } from "@/components/ui/input"
+import { motion, AnimatePresence } from "framer-motion"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 
 interface PageProps {
   params: {
@@ -38,7 +63,18 @@ export default function EventDetailsPage({ params }: PageProps) {
   const [userRole, setUserRole] = useState<string>("")
   const [deleteActivityId, setDeleteActivityId] = useState<number | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
-  
+  const [isRegistered, setIsRegistered] = useState(false)
+  const [isRegistering, setIsRegistering] = useState(false)
+  const [checkingRegistration, setCheckingRegistration] = useState(true)
+  const [registeredActivities, setRegisteredActivities] = useState<number[]>([])
+  const [registeringActivity, setRegisteringActivity] = useState<number | null>(null)
+  const [activeTab, setActiveTab] = useState("overview")
+  const [showAllActivities, setShowAllActivities] = useState(false)
+  const [activityFilter, setActivityFilter] = useState<string>("all")
+  const [searchQuery, setSearchQuery] = useState("")
+  const [isFavorite, setIsFavorite] = useState(false)
+  const [showShareOptions, setShowShareOptions] = useState(false)
+
   const router = useRouter()
   const { toast } = useToast()
 
@@ -70,6 +106,50 @@ export default function EventDetailsPage({ params }: PageProps) {
     }
   }, [params.id, router])
 
+  // Add a function to check registration status
+  const checkRegistrationStatus = async (token: string) => {
+    setCheckingRegistration(true)
+    try {
+      // Check event registration
+      const eventResponse = await fetch(`/api/events/${params.id}/check-registration`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+
+      if (eventResponse.ok) {
+        const eventData = await eventResponse.json()
+        setIsRegistered(eventData.isRegistered)
+      }
+
+      // Check activities registration
+      if (event?.activities?.length) {
+        const registeredIds: number[] = []
+
+        for (const activity of event.activities) {
+          const activityResponse = await fetch(`/api/activities/${activity.id}/check-registration`, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          })
+
+          if (activityResponse.ok) {
+            const activityData = await activityResponse.json()
+            if (activityData.isRegistered) {
+              registeredIds.push(activity.id)
+            }
+          }
+        }
+
+        setRegisteredActivities(registeredIds)
+      }
+    } catch (error) {
+      console.error("Erro ao verificar status de inscrição:", error)
+    } finally {
+      setCheckingRegistration(false)
+    }
+  }
+
   const fetchEvent = async (token: string) => {
     try {
       const response = await fetch(`/api/events/${params.id}`, {
@@ -84,6 +164,9 @@ export default function EventDetailsPage({ params }: PageProps) {
 
       const data = await response.json()
       setEvent(data)
+
+      // Check registration status after fetching event
+      await checkRegistrationStatus(token)
     } catch (err) {
       toast({
         variant: "destructive",
@@ -101,10 +184,12 @@ export default function EventDetailsPage({ params }: PageProps) {
   }
 
   const handleViewDetails = (activityId: number) => {
-    router.push(`/events/${params.id}/activities/${activityId}`);
+    router.push(`/events/${params.id}/activities/${activityId}`)
   }
 
-  const handleRegistrantionActivity = async (activityId: number) => {
+  const handleRegistrationActivity = async (activityId: number) => {
+    setRegisteringActivity(activityId)
+
     try {
       const token = getAuthToken()
 
@@ -116,35 +201,37 @@ export default function EventDetailsPage({ params }: PageProps) {
       const response = await fetch(`/api/activity-registrations/${activityId}/register`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${token}`,          
+          Authorization: `Bearer ${token}`,
         },
       })
 
       if (!response.ok) {
-        throw new Error("Erro ao se inscrever no evento.")
+        const data = await response.json()
+        throw new Error(data.error || "Erro ao se inscrever na atividade.")
       }
 
       toast({
         title: "Sucesso!",
-        description: "Inscrição realizada com sucesso.",
+        description: "Inscrição na atividade realizada com sucesso.",
       })
 
-      router.push(`/events/${params.id}`)
-
+      // Update registered activities list
+      setRegisteredActivities((prev) => [...prev, activityId])
     } catch (error) {
       toast({
         variant: "destructive",
         title: "Erro",
-        description: "Usuário já inscrito neste evento.",
+        description: error instanceof Error ? error.message : "Erro ao processar inscrição.",
       })
       console.error(error)
     } finally {
-      setIsDeleting(false)
-      setDeleteActivityId(null)
+      setRegisteringActivity(null)
     }
-  } 
+  }
 
   const handleRegistration = async () => {
+    setIsRegistering(true)
+
     try {
       const token = getAuthToken()
 
@@ -156,31 +243,31 @@ export default function EventDetailsPage({ params }: PageProps) {
       const response = await fetch(`/api/event-registrations/${params.id}/register`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${token}`,          
+          Authorization: `Bearer ${token}`,
         },
       })
 
       if (!response.ok) {
-        throw new Error("Erro ao se inscrever no evento.")
+        const data = await response.json()
+        throw new Error(data.error || "Erro ao se inscrever no evento.")
       }
 
       toast({
         title: "Sucesso!",
-        description: "Inscrição realizada com sucesso.",
+        description: "Inscrição no evento realizada com sucesso.",
       })
 
-      router.push(`/events/${params.id}`)
-
+      // Update registration status
+      setIsRegistered(true)
     } catch (error) {
       toast({
         variant: "destructive",
         title: "Erro",
-        description: "Usuário já inscrito neste evento.",
+        description: "Usuário já inscrito neste evento!",
       })
       console.error(error)
     } finally {
-      setIsDeleting(false)
-      setDeleteActivityId(null)
+      setIsRegistering(false)
     }
   }
 
@@ -230,269 +317,805 @@ export default function EventDetailsPage({ params }: PageProps) {
     }
   }
 
+  const handleToggleFavorite = () => {
+    setIsFavorite(!isFavorite)
+    toast({
+      title: isFavorite ? "Removido dos favoritos" : "Adicionado aos favoritos",
+      description: isFavorite
+        ? "Este evento foi removido da sua lista de favoritos"
+        : "Este evento foi adicionado à sua lista de favoritos",
+    })
+  }
+
+  const handleShare = (platform: string) => {
+    const eventUrl = window.location.href
+    let shareUrl = ""
+
+    switch (platform) {
+      case "whatsapp":
+        shareUrl = `https://wa.me/?text=${encodeURIComponent(`Confira este evento: ${event?.name} - ${eventUrl}`)}`
+        break
+      case "telegram":
+        shareUrl = `https://t.me/share/url?url=${encodeURIComponent(eventUrl)}&text=${encodeURIComponent(`Confira este evento: ${event?.name}`)}`
+        break
+      case "email":
+        shareUrl = `mailto:?subject=${encodeURIComponent(`Confira este evento: ${event?.name}`)}&body=${encodeURIComponent(`Olá, achei que você poderia se interessar por este evento: ${event?.name}. Confira em: ${eventUrl}`)}`
+        break
+      case "copy":
+        navigator.clipboard.writeText(eventUrl)
+        toast({
+          title: "Link copiado!",
+          description: "O link do evento foi copiado para a área de transferência.",
+        })
+        setShowShareOptions(false)
+        return
+    }
+
+    if (shareUrl) {
+      window.open(shareUrl, "_blank")
+    }
+
+    setShowShareOptions(false)
+  }
+
+  const getActivityTypeColor = (type: string) => {
+    const typeColors: Record<string, string> = {
+      Palestra: "bg-blue-100 text-blue-800 border-blue-200",
+      Workshop: "bg-purple-100 text-purple-800 border-purple-200",
+      "Mesa Redonda": "bg-amber-100 text-amber-800 border-amber-200",
+      Curso: "bg-emerald-100 text-emerald-800 border-emerald-200",
+      Minicurso: "bg-teal-100 text-teal-800 border-teal-200",
+      Apresentação: "bg-indigo-100 text-indigo-800 border-indigo-200",
+    }
+
+    return typeColors[type] || "bg-gray-100 text-gray-800 border-gray-200"
+  }
+
+  const getActivityCategoryColor = (category: string) => {
+    const categoryColors: Record<string, string> = {
+      Computação: "bg-blue-50 text-blue-600 border-blue-100",
+      Redes: "bg-indigo-50 text-indigo-600 border-indigo-100",
+      Programação: "bg-violet-50 text-violet-600 border-violet-100",
+      Design: "bg-pink-50 text-pink-600 border-pink-100",
+      Inovação: "bg-amber-50 text-amber-600 border-amber-100",
+      Empreendedorismo: "bg-emerald-50 text-emerald-600 border-emerald-100",
+    }
+
+    return categoryColors[category] || "bg-gray-50 text-gray-600 border-gray-100"
+  }
+
+  const getFilteredActivities = () => {
+    if (!event?.activities) return []
+
+    let filtered = [...event.activities]
+
+    // Apply category/type filter
+    if (activityFilter !== "all") {
+      filtered = filtered.filter((activity) => activity.category === activityFilter || activity.type === activityFilter)
+    }
+
+    // Apply search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase()
+      filtered = filtered.filter(
+        (activity) =>
+          activity.name.toLowerCase().includes(query) ||
+          (activity.description && activity.description.toLowerCase().includes(query)),
+      )
+    }
+
+    return filtered
+  }
+
+  const getUniqueFilters = () => {
+    if (!event?.activities) return []
+
+    const categories = new Set<string>()
+    const types = new Set<string>()
+
+    event.activities.forEach((activity) => {
+      if (activity.category) categories.add(activity.category)
+      if (activity.type) types.add(activity.type)
+    })
+
+    return [
+      { label: "Todas", value: "all" },
+      ...Array.from(categories).map((cat) => ({ label: cat, value: cat })),
+      ...Array.from(types).map((type) => ({ label: type, value: type })),
+    ]
+  }
+
+  const filteredActivities = getFilteredActivities()
+  const filterOptions = getUniqueFilters()
+
   if (loading) {
     return (
-      <div className="container mx-auto py-6 flex justify-center items-center min-h-[60vh]">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-[#3DD4A7]"></div>
-      </div>
+      <>
+        <Navbar />
+        <div className="container mx-auto py-6 flex justify-center items-center min-h-[60vh]">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-[#3DD4A7]"></div>
+        </div>
+      </>
     )
   }
 
   if (!event) {
     return (
-      <div className="container mx-auto py-6">
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">Evento não encontrado.</div>
-        <Button onClick={() => router.push("/feed")} className="mt-4" variant="outline">
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          Voltar para Feed
-        </Button>
-      </div>
+      <>
+        <Navbar />
+        <div className="container mx-auto py-6">
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">Evento não encontrado.</div>
+          <Button onClick={() => router.push("/feed")} className="mt-4" variant="outline">
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Voltar para Feed
+          </Button>
+        </div>
+      </>
     )
   }
 
   return (
     <>
-    <Navbar />
-    <div className="container mx-auto py-6">
-      <Button onClick={() => router.push("/feed")} className="mb-4" variant="outline">
-        <ArrowLeft className="mr-2 h-4 w-4" />
-        Voltar para Feed
-      </Button>
+      <Navbar />
 
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
-        <h1 className="text-3xl font-bold">{event.name}</h1>
-        {(userRole === "admin" || userRole === "client_admin") && (
-          <Button onClick={handleAddActivity} className="bg-[#3DD4A7] hover:bg-[#2bc090]">
-            <Plus className="mr-2 h-4 w-4" />
-            Adicionar atividade
-          </Button>
-        )}
-      </div>
+      {/* Hero Section */}
+      <div className="relative py-14">
+        <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/50 to-black/30 z-10"></div>
+        <div
+          className="h-[40vh] md:h-[60vh] w-full bg-cover bg-center"
+          style={{
+            backgroundImage: `url(${event.photo || "../../../IFPB.jpg"})`,
+          }}
+        ></div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-        <div className="lg:col-span-2">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle>Detalhes do Evento</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="aspect-video bg-gray-100 rounded-md mb-4 overflow-hidden">
-                  <img
-                    src="../../../IFPB.jpg"
-                    alt={event.name}
-                    className="w-full h-full object-cover"
-                  />
-              </div>
-
-              {event.description && (
-                <div className="mt-4">
-                  <h3 className="text-lg font-semibold mb-2">Descrição</h3>
-                  <p className="text-gray-700">{event.description}</p>
-                </div>
+        <div className="container mx-auto absolute inset-0 z-20 flex flex-col justify-end pb-8 px-4 md:px-6">
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
+            <div className="flex items-center gap-2 mb-4">
+              <Badge className="bg-[#3DD4A7] hover:bg-[#3DD4A7] text-white border-none">Evento</Badge>
+              {isRegistered && (
+                <Badge className="bg-green-500 hover:bg-green-500 text-white border-none">
+                  <Check className="h-3 w-3 mr-1" />
+                  Inscrito
+                </Badge>
               )}
-            </CardContent>
-          </Card>
-        </div>
-
-        <div>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle>Informações</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-start">
-                <Calendar className="h-5 w-5 text-gray-500 mt-0.5 mr-2" />
-                <div>
-                  <p className="font-medium">Data do Evento</p>
-                  <p className="text-gray-600">{formatDate(event.eventDate)}</p>
-                </div>
-              </div>
-
-              <div className="flex items-start">
-                <Calendar className="h-5 w-5 text-gray-500 mt-0.5 mr-2" />
-                <div>
-                  <p className="font-medium">Inscrições até</p>
-                  <p className="text-gray-600">{formatDate(event.registrationDeadline)}</p>
-                </div>
-              </div>
-
-              <div className="flex items-start">
-                <Users className="h-5 w-5 text-gray-500 mt-0.5 mr-2" />
-                <div>
-                  <p className="font-medium">Capacidade</p>
-                  <p className="text-gray-600">{event.maxRegistrations} participantes</p>
-                </div>
-              </div>
-
-              <div className="flex items-start">
-                <MapPin className="h-5 w-5 text-gray-500 mt-0.5 mr-2" />
-                <div>
-                  <p className="font-medium">Local</p>
-                  <p className="text-gray-600">IFPB</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          <div className="mt-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
-            {(userRole === "user" || userRole === "client_user") && (
-              <Button onClick={handleRegistration} className="bg-[#3DD4A7] hover:bg-[#2bc090]">
-                <Plus className="mr-2 h-4 w-4" />
-                Inscrever-se
-              </Button>
-            )}
-        </div>
-        </div>
-      </div>
-
-      <Tabs defaultValue="activities" className="w-full">
-        <TabsList className="mb-4">
-          <TabsTrigger value="activities">Atividades ({event.activities?.length || 0})</TabsTrigger>
-          <TabsTrigger value="participants">Participantes</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="activities">
-          <h2 className="text-2xl font-bold mb-4">Atividades do Evento</h2>
-
-          {event.activities && event.activities.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {event.activities.map((activity: Activity) => (
-                <Card key={activity.id} className="overflow-hidden">
-                  {activity.photo && (
-                    <div className="h-40 overflow-hidden">
-                      <img
-                        src={activity.photo || "/placeholder.svg"}
-                        alt={activity.name}
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-                  )}
-
-                  <CardHeader className="pb-2">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <CardTitle className="text-lg">{activity.name}</CardTitle>
-                        {activity.type && <CardDescription>{activity.type}</CardDescription>}
-                      </div>
-
-                      {(userRole === "user" || userRole === "client_user") && (
-                        <Button onClick={() => handleRegistrantionActivity(activity.id)} className="bg-[#3DD4A7] hover:bg-[#2bc090]">
-                          <Plus className="mr-2 h-4 w-4" />
-                          Inscrever-se
-                        </Button>
-                      )}
-
-                      {(userRole === "admin" || userRole === "client_admin") && (
-                        <div className="flex space-x-1">
-                          {/* <Button variant="ghost" size="icon" className="h-8 w-8">
-                            <Pencil className="h-4 w-4" />
-                          </Button> */}
-                          <Button variant="outline" size="sm" onClick={() => handleViewDetails(activity.id)}>
-                            <ExternalLink className="h-4 w-4 mr-2" />
-                            Detalhes
-                          </Button>
-                                            
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-red-500 hover:text-red-700 hover:bg-red-50"
-                            onClick={() => setDeleteActivityId(activity.id)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  </CardHeader>
-
-                  <CardContent className="pb-2">
-                    <div className="flex flex-col space-y-2">
-                      {activity.location && (
-                        <div className="flex items-center text-sm text-gray-600">
-                          <MapPin className="h-4 w-4 mr-1" />
-                          {activity.location}
-                        </div>
-                      )}
-
-                      {activity.activityDate && activity.activityTime && (
-                        <div className="flex items-center text-sm text-gray-600">
-                          <Clock className="h-4 w-4 mr-1" />
-                          {formatDate(activity.activityDate)} às {activity.activityTime}
-                        </div>
-                      )}
-                    </div>
-                  </CardContent>
-
-                  <CardFooter>
-                    {activity.category && (
-                      <Badge variant="outline" className="bg-[#e6f7f2] text-[#3DD4A7] border-[#3DD4A7]">
-                        {activity.category}
-                      </Badge>
-                    )}
-                  </CardFooter>
-                </Card>
-              ))}
             </div>
-          ) : (
-            <div className="bg-gray-50 border border-gray-200 text-gray-700 px-4 py-8 rounded text-center">
-              <p className="mb-4">Nenhuma atividade cadastrada para este evento.</p>
-              {(userRole === "admin" || userRole === "client_admin") && (
-                <Button onClick={handleAddActivity} className="bg-[#3DD4A7] hover:bg-[#2bc090]">
-                  <Plus className="mr-2 h-4 w-4" />
-                  Adicionar primeira atividade
+
+            <h1 className="text-3xl md:text-5xl font-bold text-white mb-4 leading-tight">{event.name}</h1>
+
+            <div className="flex flex-wrap gap-4 mt-4">
+              <div className="flex items-center text-white/90 text-sm">
+                <CalendarDays className="h-4 w-4 mr-2" />
+                {formatDate(event.eventDate)}
+              </div>
+              <div className="flex items-center text-white/90 text-sm">
+                <MapPin className="h-4 w-4 mr-2" />
+                IFPB Campus Cajazeiras
+              </div>
+              <div className="flex items-center text-white/90 text-sm">
+                <Users className="h-4 w-4 mr-2" />
+                {event.maxRegistrations} participantes
+              </div>
+            </div>
+
+            <div className="mt-6 flex flex-wrap gap-3">
+              {(userRole === "user" || userRole === "client_user") && !isRegistered && (
+                <Button
+                  onClick={handleRegistration}
+                  className="bg-[#3DD4A7] hover:bg-[#2bc090] text-white"
+                  disabled={isRegistering}
+                  size="lg"
+                >
+                  {isRegistering ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Inscrevendo...
+                    </>
+                  ) : (
+                    <>
+                      <TicketIcon className="mr-2 h-4 w-4" />
+                      Inscrever-se
+                    </>
+                  )}
                 </Button>
               )}
-            </div>
-          )}
-        </TabsContent>
 
-        <TabsContent value="participants">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Users className="h-5 w-5" />
-                Participantes ({event.registrations?.length || 0})
-              </CardTitle>
-              <CardDescription>Lista de pessoas inscritas neste evento</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {event.registrations && event.registrations.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b">
-                        <th className="text-left py-3 px-4">Nome</th>
-                        <th className="text-left py-3 px-4">Email</th>
-                        <th className="text-left py-3 px-4">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {event.registrations.map((participant) => (
-                        <tr key={participant.id} className="border-b hover:bg-gray-50">
-                          <td className="py-3 px-4 font-medium">{participant.userName}</td>
-                          <td className="py-3 px-4">
-                            <Badge className="bg-green-100 text-green-800 hover:bg-green-100">Confirmado</Badge>
-                          </td>
-                          <td className="py-3 px-4">
-                            <Badge className="bg-green-100 text-green-800 hover:bg-green-100">Confirmado</Badge>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              <Button
+                variant="outline"
+                className="bg-white/10 backdrop-blur-sm border-white/20 text-white hover:bg-white/20"
+                onClick={() => setShowShareOptions(!showShareOptions)}
+              >
+                <Share2 className="mr-2 h-4 w-4" />
+                Compartilhar
+              </Button>
+
+              {/* Share options dropdown */}
+              <AnimatePresence>
+                {showShareOptions && (
+                  <motion.div
+                    className="absolute mt-12 bg-white rounded-lg shadow-lg p-2 z-30"
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <div className="flex flex-col gap-1 min-w-[180px]">
+                      <Button variant="ghost" className="justify-start" onClick={() => handleShare("whatsapp")}>
+                        WhatsApp
+                      </Button>
+                      <Button variant="ghost" className="justify-start" onClick={() => handleShare("telegram")}>
+                        Telegram
+                      </Button>
+                      <Button variant="ghost" className="justify-start" onClick={() => handleShare("email")}>
+                        Email
+                      </Button>
+                      <Separator className="my-1" />
+                      <Button variant="ghost" className="justify-start" onClick={() => handleShare("copy")}>
+                        Copiar link
+                      </Button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </motion.div>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="container mx-auto py-8 px-4 md:px-6">
+        <div className="flex flex-col md:flex-row gap-8">
+          {/* Left Column - Main Content */}
+          <div className="w-full md:w-2/3">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+              <TabsList className="mb-6 bg-white border rounded-lg p-1">
+                <TabsTrigger
+                  value="overview"
+                  className="data-[state=active]:bg-[#3DD4A7] data-[state=active]:text-white rounded-md"
+                >
+                  Visão Geral
+                </TabsTrigger>
+                <TabsTrigger
+                  value="activities"
+                  className="data-[state=active]:bg-[#3DD4A7] data-[state=active]:text-white rounded-md"
+                >
+                  Atividades ({event.activities?.length || 0})
+                </TabsTrigger>
+                <TabsTrigger
+                  value="participants"
+                  className="data-[state=active]:bg-[#3DD4A7] data-[state=active]:text-white rounded-md"
+                >
+                  Participantes
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="overview" className="focus-visible:outline-none focus-visible:ring-0">
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
+                  <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
+                    <h2 className="text-2xl font-bold mb-4">Sobre o evento</h2>
+                    <p className="text-gray-700 mb-6 leading-relaxed">
+                      {event.description ||
+                        "Este evento promete ser uma experiência enriquecedora para todos os participantes, oferecendo oportunidades de aprendizado, networking e crescimento profissional. Junte-se a nós para explorar as últimas tendências e inovações da área."}
+                    </p>
+
+                    <Separator className="my-6" />
+
+                    <h3 className="text-lg font-semibold mb-4">Destaques</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="flex items-start">
+                        <div className="bg-[#e6f7f2] p-2 rounded-lg mr-3">
+                          <Star className="h-5 w-5 text-[#3DD4A7]" />
+                        </div>
+                        <div>
+                          <h4 className="font-medium">Palestrantes Renomados</h4>
+                          <p className="text-sm text-gray-600">Aprenda com especialistas da área</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-start">
+                        <div className="bg-[#e6f7f2] p-2 rounded-lg mr-3">
+                          <Users className="h-5 w-5 text-[#3DD4A7]" />
+                        </div>
+                        <div>
+                          <h4 className="font-medium">Networking</h4>
+                          <p className="text-sm text-gray-600">Conecte-se com outros profissionais</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-start">
+                        <div className="bg-[#e6f7f2] p-2 rounded-lg mr-3">
+                          <TicketIcon className="h-5 w-5 text-[#3DD4A7]" />
+                        </div>
+                        <div>
+                          <h4 className="font-medium">Certificado</h4>
+                          <p className="text-sm text-gray-600">Receba certificado de participação</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-start">
+                        <div className="bg-[#e6f7f2] p-2 rounded-lg mr-3">
+                          <Calendar className="h-5 w-5 text-[#3DD4A7]" />
+                        </div>
+                        <div>
+                          <h4 className="font-medium">Atividades Diversas</h4>
+                          <p className="text-sm text-gray-600">
+                            {event.activities?.length || 0} atividades disponíveis
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <Separator className="my-6" />
+
+                    <h3 className="text-lg font-semibold mb-4">Perguntas Frequentes</h3>
+                    <Accordion type="single" collapsible className="w-full">
+                      <AccordionItem value="item-1">
+                        <AccordionTrigger>Como faço para me inscrever nas atividades?</AccordionTrigger>
+                        <AccordionContent>
+                          Após se inscrever no evento, você pode navegar até a aba "Atividades" e clicar no botão
+                          "Inscrever-se" em cada atividade de seu interesse.
+                        </AccordionContent>
+                      </AccordionItem>
+                    </Accordion>
+                  </div>
+
+                  {event.activities && event.activities.length > 0 && (
+                    <div className="bg-white rounded-xl shadow-sm p-6">
+                      <div className="flex justify-between items-center mb-4">
+                        <h2 className="text-2xl font-bold">Próximas atividades</h2>
+                        <Button
+                          variant="link"
+                          onClick={() => setActiveTab("activities")}
+                          className="text-[#3DD4A7] hover:text-[#2bc090]"
+                        >
+                          Ver todas
+                        </Button>
+                      </div>
+
+                      <div className="space-y-4">
+                        {event.activities.slice(0, 3).map((activity) => (
+                          <motion.div
+                            key={activity.id}
+                            className="flex flex-col sm:flex-row gap-4 p-4 border rounded-lg hover:border-[#3DD4A7] transition-colors cursor-pointer group"
+                            onClick={() => handleViewDetails(activity.id)}
+                            whileHover={{ scale: 1.01 }}
+                            transition={{ type: "spring", stiffness: 400, damping: 10 }}
+                          >
+                            <div className="sm:w-24 h-24 bg-gray-100 rounded-lg flex-shrink-0 overflow-hidden">
+                              {activity.photo ? (
+                                <img
+                                  src={activity.photo || "/placeholder.svg"}
+                                  alt={activity.name}
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center">
+                                  <Calendar className="h-8 w-8 text-gray-400" />
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="flex-1">
+                              <div className="flex flex-wrap gap-2 mb-2">
+                                {activity.type && (
+                                  <Badge variant="outline" className={getActivityTypeColor(activity.type)}>
+                                    {activity.type}
+                                  </Badge>
+                                )}
+                                {activity.category && (
+                                  <Badge variant="outline" className={getActivityCategoryColor(activity.category)}>
+                                    {activity.category}
+                                  </Badge>
+                                )}
+                                {registeredActivities.includes(activity.id) && (
+                                  <Badge className="bg-green-100 text-green-800 border-green-200">
+                                    <Check className="h-3 w-3 mr-1" />
+                                    Inscrito
+                                  </Badge>
+                                )}
+                              </div>
+
+                              <h3 className="font-semibold text-lg group-hover:text-[#3DD4A7] transition-colors">
+                                {activity.name}
+                              </h3>
+
+                              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-sm text-gray-600">
+                                <div className="flex items-center">
+                                  <Calendar className="h-4 w-4 mr-1" />
+                                  {formatDate(activity.activityDate)}
+                                </div>
+                                <div className="flex items-center">
+                                  <Clock className="h-4 w-4 mr-1" />
+                                  {activity.activityTime}
+                                </div>
+                                <div className="flex items-center">
+                                  <MapPin className="h-4 w-4 mr-1" />
+                                  {activity.location}
+                                </div>
+                              </div>
+                            </div>
+                          </motion.div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </motion.div>
+              </TabsContent>
+
+              <TabsContent value="activities" className="focus-visible:outline-none focus-visible:ring-0">
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
+                  <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+                      <h2 className="text-2xl font-bold">Atividades do evento</h2>
+
+                      {(userRole === "admin" || userRole === "client_admin") && (
+                        <Button onClick={handleAddActivity} className="bg-[#3DD4A7] hover:bg-[#2bc090]">
+                          <Plus className="mr-2 h-4 w-4" />
+                          Adicionar atividade
+                        </Button>
+                      )}
+                    </div>
+
+                    {/* Search and filter controls */}
+                    <div className="flex flex-col md:flex-row gap-4 mb-6">
+                      <div className="relative flex-1">
+                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                        <Input
+                          placeholder="Buscar atividades..."
+                          className="pl-10"
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                        />
+                      </div>
+
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="outline" className="w-full md:w-auto">
+                            <Filter className="h-4 w-4 mr-2" />
+                            Filtrar: {activityFilter === "all" ? "Todas" : activityFilter}
+                            <ChevronDown className="h-4 w-4 ml-2" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-[200px]">
+                          {filterOptions.map((option) => (
+                            <DropdownMenuItem
+                              key={option.value}
+                              onClick={() => setActivityFilter(option.value)}
+                              className={cn(
+                                "cursor-pointer",
+                                activityFilter === option.value && "bg-[#e6f7f2] text-[#3DD4A7] font-medium",
+                              )}
+                            >
+                              {option.label}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+
+                    {filteredActivities.length > 0 ? (
+                      <div className="space-y-6">
+                        {(showAllActivities ? filteredActivities : filteredActivities.slice(0, 5)).map((activity) => (
+                          <motion.div
+                            key={activity.id}
+                            className="flex flex-col md:flex-row gap-4 p-4 border rounded-lg hover:border-[#3DD4A7] transition-colors"
+                            whileHover={{ scale: 1.01 }}
+                            transition={{ type: "spring", stiffness: 400, damping: 10 }}
+                          >
+                            <div className="md:w-32 h-32 bg-gray-100 rounded-lg flex-shrink-0 overflow-hidden">
+                              {activity.photo ? (
+                                <img
+                                  src={activity.photo || "/placeholder.svg"}
+                                  alt={activity.name}
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center">
+                                  <Calendar className="h-10 w-10 text-gray-400" />
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="flex-1">
+                              <div className="flex flex-wrap gap-2 mb-2">
+                                {activity.type && (
+                                  <Badge variant="outline" className={getActivityTypeColor(activity.type)}>
+                                    {activity.type}
+                                  </Badge>
+                                )}
+                                {activity.category && (
+                                  <Badge variant="outline" className={getActivityCategoryColor(activity.category)}>
+                                    {activity.category}
+                                  </Badge>
+                                )}
+                                {registeredActivities.includes(activity.id) && (
+                                  <Badge className="bg-green-100 text-green-800 border-green-200">
+                                    <Check className="h-3 w-3 mr-1" />
+                                    Inscrito
+                                  </Badge>
+                                )}
+                              </div>
+
+                              <h3 className="font-semibold text-lg">{activity.name}</h3>
+
+                              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-sm text-gray-600">
+                                <div className="flex items-center">
+                                  <Calendar className="h-4 w-4 mr-1" />
+                                  {formatDate(activity.activityDate)}
+                                </div>
+                                <div className="flex items-center">
+                                  <Clock className="h-4 w-4 mr-1" />
+                                  {activity.activityTime}
+                                </div>
+                                <div className="flex items-center">
+                                  <MapPin className="h-4 w-4 mr-1" />
+                                  {activity.location}
+                                </div>
+                              </div>
+
+                              <div className="flex flex-wrap gap-2 mt-4">
+                                <Button variant="outline" size="sm" onClick={() => handleViewDetails(activity.id)}>
+                                  <ExternalLink className="h-4 w-4 mr-2" />
+                                  Ver detalhes
+                                </Button>
+
+                                {(userRole === "user" || userRole === "client_user") &&
+                                  !registeredActivities.includes(activity.id) && (
+                                    <Button
+                                      size="sm"
+                                      className="bg-[#3DD4A7] hover:bg-[#2bc090]"
+                                      onClick={() => handleRegistrationActivity(activity.id)}
+                                      disabled={registeringActivity === activity.id}
+                                    >
+                                      {registeringActivity === activity.id ? (
+                                        <>
+                                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                          Inscrevendo...
+                                        </>
+                                      ) : (
+                                        <>
+                                          <Plus className="mr-2 h-4 w-4" />
+                                          Inscrever-se
+                                        </>
+                                      )}
+                                    </Button>
+                                  )}
+
+                                {(userRole === "admin" || userRole === "client_admin") && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="text-red-500 hover:text-red-700 hover:bg-red-50 border-red-200"
+                                    onClick={() => setDeleteActivityId(activity.id)}
+                                  >
+                                    <Trash2 className="h-4 w-4 mr-2" />
+                                    Excluir
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          </motion.div>
+                        ))}
+
+                        {filteredActivities.length > 5 && (
+                          <div className="flex justify-center mt-6">
+                            <Button
+                              variant="outline"
+                              onClick={() => setShowAllActivities(!showAllActivities)}
+                              className="w-full md:w-auto"
+                            >
+                              {showAllActivities ? (
+                                <>Mostrar menos</>
+                              ) : (
+                                <>Mostrar todas as {filteredActivities.length} atividades</>
+                              )}
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-center py-12 bg-gray-50 rounded-lg border">
+                        <Calendar className="h-16 w-16 mx-auto text-gray-300 mb-4" />
+                        <h3 className="text-xl font-medium mb-2">
+                          {searchQuery || activityFilter !== "all"
+                            ? "Nenhuma atividade encontrada"
+                            : "Nenhuma atividade cadastrada"}
+                        </h3>
+                        <p className="text-gray-500 mb-6">
+                          {searchQuery || activityFilter !== "all"
+                            ? "Tente ajustar os filtros ou termos de busca."
+                            : "Este evento ainda não possui atividades."}
+                        </p>
+
+                        {(userRole === "admin" || userRole === "client_admin") &&
+                          !searchQuery &&
+                          activityFilter === "all" && (
+                            <Button onClick={handleAddActivity} className="bg-[#3DD4A7] hover:bg-[#2bc090]">
+                              <Plus className="mr-2 h-4 w-4" />
+                              Adicionar primeira atividade
+                            </Button>
+                          )}
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              </TabsContent>
+
+              <TabsContent value="participants" className="focus-visible:outline-none focus-visible:ring-0">
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
+                  <div className="bg-white rounded-xl shadow-sm p-6">
+                    <h2 className="text-2xl font-bold mb-6">Participantes</h2>
+
+                    {event.registrations && event.registrations.length > 0 ? (
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                          {event.registrations.map((participant) => (
+                            <motion.div
+                              key={participant.id}
+                              className="flex items-center p-3 border rounded-lg hover:border-[#3DD4A7] transition-colors"
+                              whileHover={{ scale: 1.02 }}
+                              transition={{ type: "spring", stiffness: 400, damping: 10 }}
+                            >
+                              <Avatar className="h-10 w-10 mr-3">
+                                <AvatarImage
+                                  src={`https://api.dicebear.com/7.x/initials/svg?seed=${participant.userName}`}
+                                />
+                                <AvatarFallback className="bg-[#e6f7f2] text-[#3DD4A7]">
+                                  {participant.userName?.charAt(0) || "U"}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div>
+                                <p className="font-medium">{participant.userName || "Participante"}</p>
+                                <p className="text-sm text-gray-500">Confirmado</p>
+                              </div>
+                            </motion.div>
+                          ))}
+                        </div>
+
+                        <div className="mt-6 flex justify-end">
+                          <Button variant="outline" className="gap-2">
+                            <Download className="h-4 w-4" />
+                            Exportar lista
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-center py-12 bg-gray-50 rounded-lg border">
+                        <Users className="h-16 w-16 mx-auto text-gray-300 mb-4" />
+                        <h3 className="text-xl font-medium mb-2">Nenhum participante inscrito</h3>
+                        <p className="text-gray-500">
+                          Quando as pessoas se inscreverem no evento, elas aparecerão aqui.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              </TabsContent>
+            </Tabs>
+          </div>
+
+          {/* Right Column - Sidebar */}
+          <div className="w-full md:w-1/3">
+            <div className="sticky top-24">
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5, delay: 0.2 }}
+              >
+                <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
+                  <h2 className="text-xl font-bold mb-4">Informações do evento</h2>
+
+                  <div className="space-y-4">
+                    <div className="flex items-start">
+                      <div className="bg-[#e6f7f2] p-2 rounded-lg mr-3">
+                        <Calendar className="h-5 w-5 text-[#3DD4A7]" />
+                      </div>
+                      <div>
+                        <h4 className="font-medium">Data do evento</h4>
+                        <p className="text-gray-600">{formatDate(event.eventDate)}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start">
+                      <div className="bg-[#e6f7f2] p-2 rounded-lg mr-3">
+                        <MapPin className="h-5 w-5 text-[#3DD4A7]" />
+                      </div>
+                      <div>
+                        <h4 className="font-medium">Local</h4>
+                        <p className="text-gray-600">IFPB</p>
+                        <p className="text-sm text-gray-500">Campus Cajazeiras</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start">
+                      <div className="bg-[#e6f7f2] p-2 rounded-lg mr-3">
+                        <Users className="h-5 w-5 text-[#3DD4A7]" />
+                      </div>
+                      <div>
+                        <h4 className="font-medium">Capacidade</h4>
+                        <p className="text-gray-600">{event.maxRegistrations} participantes</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start">
+                      <div className="bg-[#e6f7f2] p-2 rounded-lg mr-3">
+                        <CalendarDays className="h-5 w-5 text-[#3DD4A7]" />
+                      </div>
+                      <div>
+                        <h4 className="font-medium">Inscrições até</h4>
+                        <p className="text-gray-600">{formatDate(event.registrationDeadline)}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <Separator className="my-6" />
+
+                  <div className="space-y-4">
+                    {(userRole === "user" || userRole === "client_user") && (
+                      <Button
+                        className="w-full bg-[#3DD4A7] hover:bg-[#2bc090] h-12 text-base"
+                        disabled={isRegistered || isRegistering || checkingRegistration}
+                        onClick={handleRegistration}
+                      >
+                        {checkingRegistration ? (
+                          <>
+                            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                            Verificando...
+                          </>
+                        ) : isRegistering ? (
+                          <>
+                            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                            Inscrevendo...
+                          </>
+                        ) : isRegistered ? (
+                          <>
+                            <Check className="mr-2 h-5 w-5" />
+                            Inscrito
+                          </>
+                        ) : (
+                          <>
+                            <TicketIcon className="mr-2 h-5 w-5" />
+                            Inscrever-se no evento
+                          </>
+                        )}
+                      </Button>
+                    )}
+                  </div>
                 </div>
-              ) : (
-                <div className="py-8 text-center text-gray-500">
-                  <Users className="h-12 w-12 mx-auto text-gray-300 mb-3" />
-                  <p className="text-lg font-medium mb-1">Nenhum participante inscrito</p>
-                  <p className="text-sm text-gray-400">
-                    Quando as pessoas se inscreverem no evento, elas aparecerão aqui.
-                  </p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+
+                {event.activities && event.activities.length > 0 && (
+                  <div className="bg-white rounded-xl shadow-sm p-6">
+                    <h2 className="text-xl font-bold mb-4">Estatísticas</h2>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="bg-gray-50 p-4 rounded-lg text-center">
+                        <p className="text-3xl font-bold text-[#3DD4A7]">{event.activities.length}</p>
+                        <p className="text-sm text-gray-600">Atividades</p>
+                      </div>
+
+                      <div className="bg-gray-50 p-4 rounded-lg text-center">
+                        <p className="text-3xl font-bold text-[#3DD4A7]">{event.registrations?.length || 0}</p>
+                        <p className="text-sm text-gray-600">Participantes</p>
+                      </div>
+
+                      <div className="bg-gray-50 p-4 rounded-lg text-center">
+                        <p className="text-3xl font-bold text-[#3DD4A7]">{registeredActivities.length}</p>
+                        <p className="text-sm text-gray-600">Suas inscrições</p>
+                      </div>
+
+                      <div className="bg-gray-50 p-4 rounded-lg text-center">
+                        <p className="text-3xl font-bold text-[#3DD4A7]">
+                          {Math.round(((event.registrations?.length || 0) / event.maxRegistrations) * 100)}%
+                        </p>
+                        <p className="text-sm text-gray-600">Ocupação</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </motion.div>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Diálogo de confirmação para excluir atividade */}
       <AlertDialog open={deleteActivityId !== null} onOpenChange={(open) => !open && setDeleteActivityId(null)}>
@@ -522,7 +1145,13 @@ export default function EventDetailsPage({ params }: PageProps) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+
+      {/* Botão de voltar para mobile */}
+      <div className="md:hidden fixed bottom-4 left-4 z-30">
+        <Button onClick={() => router.push("/feed")} className="bg-white text-gray-800 shadow-lg border" size="icon">
+          <ArrowLeft className="h-5 w-5" />
+        </Button>
+      </div>
     </>
   )
 }
