@@ -10,6 +10,7 @@ export interface ActivityRegistration {
     id: number
     name: string
     location?: string
+    description?: string
     activityDate?: string
     activityTime?: string
     type?: string

@@ -9,21 +9,17 @@ import { formatDate, cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import {
   Calendar,
-  Clock,
   MapPin,
   Plus,
   Users,
   Trash2,
   ArrowLeft,
   Loader2,
-  ExternalLink,
   CalendarDays,
   Check,
   Share2,
   Star,
   TicketIcon,
-  Heart,
-  Download,
   ChevronDown,
   Filter,
   Search,
@@ -48,7 +44,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from "@/components/ui/input"
 import { motion, AnimatePresence } from "framer-motion"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import ActivityCard from "@/components/activity-card"
 
 interface PageProps {
   params: {
@@ -67,6 +63,7 @@ export default function EventDetailsPage({ params }: PageProps) {
   const [isRegistering, setIsRegistering] = useState(false)
   const [checkingRegistration, setCheckingRegistration] = useState(true)
   const [registeredActivities, setRegisteredActivities] = useState<number[]>([])
+  const [activityRegistrationIds, setActivityRegistrationIds] = useState<Record<number, number>>({})
   const [registeringActivity, setRegisteringActivity] = useState<number | null>(null)
   const [activeTab, setActiveTab] = useState("overview")
   const [showAllActivities, setShowAllActivities] = useState(false)
@@ -74,11 +71,9 @@ export default function EventDetailsPage({ params }: PageProps) {
   const [searchQuery, setSearchQuery] = useState("")
   const [isFavorite, setIsFavorite] = useState(false)
   const [showShareOptions, setShowShareOptions] = useState(false)
-  // Add a new state variable to track the user's registration ID
   const [userRegistrationId, setUserRegistrationId] = useState<number | null>(null)
   const [isCanceling, setIsCanceling] = useState(false)
   const [showCancelDialog, setShowCancelDialog] = useState(false)
-  // Adicione um estado para rastrear o status da inscrição
   const [registrationStatus, setRegistrationStatus] = useState<string>("PENDING")
 
   const router = useRouter()
@@ -96,7 +91,6 @@ export default function EventDetailsPage({ params }: PageProps) {
       const decodedToken = decodeJwt(token)
       const userRoles = decodedToken.resource_access?.["eventus-rest-api"]?.roles || []
 
-      // Verificar o papel do usuário
       if (userRoles.includes("admin")) {
         setUserRole("admin")
       } else if (userRoles.includes("client_admin")) {
@@ -112,26 +106,82 @@ export default function EventDetailsPage({ params }: PageProps) {
     }
   }, [params.id, router])
 
-  // Adicione uma função para verificar periodicamente o status da inscrição
   useEffect(() => {
-    // Verificar o status da inscrição a cada 30 segundos se o usuário estiver inscrito
     if (isRegistered && !checkingRegistration) {
       const intervalId = setInterval(() => {
         const token = getAuthToken()
         if (token) {
           checkRegistrationStatus(token)
         }
-      }, 30000) // 30 segundos
+      }, 30000)
 
       return () => clearInterval(intervalId)
     }
   }, [isRegistered, checkingRegistration, params.id])
 
-  // Add a function to check registration status
+  const isUserRegisteredInActivity = (activity: any) => {
+    if (!activity.registrations || activity.registrations.length === 0) return false
+
+    const token = getAuthToken()
+    if (!token) return false
+
+    try {
+      const decodedToken = decodeJwt(token)
+      const userId = decodedToken.sub
+
+      return activity.registrations.some((reg: any) => reg.userId === userId && reg.registered === true)
+    } catch (error) {
+      console.error("Erro ao verificar inscrição na atividade:", error)
+      return false
+    }
+  }
+
+  const handleCancelActivityRegistration = async (activityId: number) => {
+    try {
+      const token = getAuthToken()
+
+      if (!token) {
+        router.push("/")
+        return
+      }
+
+      const response = await fetch(`/api/activity-registrations/${activityId}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "X-HTTP-Method-Override": "DELETE",
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error("Erro ao cancelar inscrição na atividade.")
+      }
+
+      toast({
+        title: "Sucesso!",
+        description: "Sua inscrição na atividade foi cancelada com sucesso.",
+      })
+
+      setRegisteredActivities((prev) => prev.filter((id) => id !== activityId))
+
+      const token2 = getAuthToken()
+      if (token2) {
+        fetchEvent(token2)
+      }
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Erro",
+        description: error instanceof Error ? error.message : "Erro ao cancelar inscrição na atividade.",
+      })
+      console.error(error)
+    }
+  }
+
   const checkRegistrationStatus = async (token: string) => {
     setCheckingRegistration(true)
     try {
-      // Buscar dados do evento que inclui as inscrições
       const eventResponse = await fetch(`/api/events/${params.id}`, {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -141,11 +191,9 @@ export default function EventDetailsPage({ params }: PageProps) {
       if (eventResponse.ok) {
         const eventData = await eventResponse.json()
 
-        // Obter informações do usuário do token
         const decodedToken = decodeJwt(token)
         const userId = decodedToken.sub
 
-        // Verificar se o usuário está na lista de registrations
         const userRegistration = eventData.registrations?.find(
           (reg: any) => reg.userId === userId && reg.registered === true,
         )
@@ -154,16 +202,23 @@ export default function EventDetailsPage({ params }: PageProps) {
 
         if (userRegistration) {
           setUserRegistrationId(userRegistration.id)
-          // Como não temos informações detalhadas sobre o status, assumimos ACTIVE se registered for true
           setRegistrationStatus(userRegistration.registered ? "ACTIVE" : "PENDING")
         } else {
           setUserRegistrationId(null)
           setRegistrationStatus("PENDING")
         }
 
-        // Para as atividades, como não temos a rota específica,
-        // podemos manter o estado atual ou implementar uma lógica baseada nos dados disponíveis
-        // Por enquanto, mantemos o array existente
+        if (eventData.activities) {
+          const registeredActivityIds = []
+
+          for (const activity of eventData.activities) {
+            if (isUserRegisteredInActivity(activity)) {
+              registeredActivityIds.push(activity.id)
+            }
+          }
+
+          setRegisteredActivities(registeredActivityIds)
+        }
       }
     } catch (error) {
       console.error("Erro ao verificar status de inscrição:", error)
@@ -172,7 +227,6 @@ export default function EventDetailsPage({ params }: PageProps) {
     }
   }
 
-  // Add a function to handle cancellation of registration
   const handleCancelRegistration = async () => {
     setIsCanceling(true)
     try {
@@ -183,7 +237,6 @@ export default function EventDetailsPage({ params }: PageProps) {
         return
       }
 
-      // Usar o ID do evento para cancelar a inscrição
       const response = await fetch(`/api/event-registrations/${params.id}`, {
         method: "DELETE",
         headers: {
@@ -202,13 +255,12 @@ export default function EventDetailsPage({ params }: PageProps) {
         description: "Sua inscrição foi cancelada com sucesso.",
       })
 
-      // Update registration status
       setIsRegistered(false)
       setUserRegistrationId(null)
       setShowCancelDialog(false)
 
-      // Also clear registered activities since the user is no longer registered for the event
       setRegisteredActivities([])
+      setActivityRegistrationIds({})
     } catch (error) {
       toast({
         variant: "destructive",
@@ -236,7 +288,6 @@ export default function EventDetailsPage({ params }: PageProps) {
       const data = await response.json()
       setEvent(data)
 
-      // Check registration status after fetching event
       await checkRegistrationStatus(token)
     } catch (err) {
       toast({
@@ -286,8 +337,12 @@ export default function EventDetailsPage({ params }: PageProps) {
         description: "Inscrição na atividade realizada com sucesso.",
       })
 
-      // Update registered activities list
       setRegisteredActivities((prev) => [...prev, activityId])
+
+      const token2 = getAuthToken()
+      if (token2) {
+        fetchEvent(token2)
+      }
     } catch (error) {
       toast({
         variant: "destructive",
@@ -300,7 +355,6 @@ export default function EventDetailsPage({ params }: PageProps) {
     }
   }
 
-  // Modifique a função handleRegistration para atualizar o estado após a inscrição
   const handleRegistration = async () => {
     setIsRegistering(true)
 
@@ -324,7 +378,6 @@ export default function EventDetailsPage({ params }: PageProps) {
         throw new Error(data.error || "Erro ao se inscrever no evento.")
       }
 
-      // Obter o ID da inscrição da resposta
       const data = await response.json()
       if (data && data.id) {
         setUserRegistrationId(data.id)
@@ -335,11 +388,9 @@ export default function EventDetailsPage({ params }: PageProps) {
         description: "Inscrição no evento realizada com sucesso.",
       })
 
-      // Update registration status
       setIsRegistered(true)
       setRegistrationStatus("ACTIVE")
 
-      // Atualizar os dados do evento após o registro
       const token2 = getAuthToken()
       if (token2) {
         fetchEvent(token2)
@@ -387,7 +438,6 @@ export default function EventDetailsPage({ params }: PageProps) {
       })
 
       const token2 = getAuthToken()
-
       fetchEvent(token2 || "")
     } catch (error) {
       toast({
@@ -443,43 +493,15 @@ export default function EventDetailsPage({ params }: PageProps) {
     setShowShareOptions(false)
   }
 
-  const getActivityTypeColor = (type: string) => {
-    const typeColors: Record<string, string> = {
-      Palestra: "bg-blue-100 text-blue-800 border-blue-200",
-      Workshop: "bg-purple-100 text-purple-800 border-purple-200",
-      "Mesa Redonda": "bg-amber-100 text-amber-800 border-amber-200",
-      Curso: "bg-emerald-100 text-emerald-800 border-emerald-200",
-      Minicurso: "bg-teal-100 text-teal-800 border-teal-200",
-      Apresentação: "bg-indigo-100 text-indigo-800 border-indigo-200",
-    }
-
-    return typeColors[type] || "bg-gray-100 text-gray-800 border-gray-200"
-  }
-
-  const getActivityCategoryColor = (category: string) => {
-    const categoryColors: Record<string, string> = {
-      Computação: "bg-blue-50 text-blue-600 border-blue-100",
-      Redes: "bg-indigo-50 text-indigo-600 border-indigo-100",
-      Programação: "bg-violet-50 text-violet-600 border-violet-100",
-      Design: "bg-pink-50 text-pink-600 border-pink-100",
-      Inovação: "bg-amber-50 text-amber-600 border-amber-100",
-      Empreendedorismo: "bg-emerald-50 text-emerald-600 border-emerald-100",
-    }
-
-    return categoryColors[category] || "bg-gray-50 text-gray-600 border-gray-100"
-  }
-
   const getFilteredActivities = () => {
     if (!event?.activities) return []
 
     let filtered = [...event.activities]
 
-    // Apply category/type filter
     if (activityFilter !== "all") {
       filtered = filtered.filter((activity) => activity.category === activityFilter || activity.type === activityFilter)
     }
 
-    // Apply search filter
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase()
       filtered = filtered.filter(
@@ -508,6 +530,13 @@ export default function EventDetailsPage({ params }: PageProps) {
       ...Array.from(categories).map((cat) => ({ label: cat, value: cat })),
       ...Array.from(types).map((type) => ({ label: type, value: type })),
     ]
+  }
+
+  const refreshEventData = () => {
+    const token = getAuthToken()
+    if (token) {
+      fetchEvent(token)
+    }
   }
 
   const filteredActivities = getFilteredActivities()
@@ -728,16 +757,6 @@ export default function EventDetailsPage({ params }: PageProps) {
 
                       <div className="flex items-start">
                         <div className="bg-[#e6f7f2] p-2 rounded-lg mr-3">
-                          <TicketIcon className="h-5 w-5 text-[#3DD4A7]" />
-                        </div>
-                        <div>
-                          <h4 className="font-medium">Certificado</h4>
-                          <p className="text-sm text-gray-600">Receba certificado de participação</p>
-                        </div>
-                      </div>
-
-                      <div className="flex items-start">
-                        <div className="bg-[#e6f7f2] p-2 rounded-lg mr-3">
                           <Calendar className="h-5 w-5 text-[#3DD4A7]" />
                         </div>
                         <div>
@@ -785,67 +804,15 @@ export default function EventDetailsPage({ params }: PageProps) {
 
                       <div className="space-y-4">
                         {event.activities.slice(0, 3).map((activity) => (
-                          <motion.div
+                          <ActivityCard
                             key={activity.id}
-                            className="flex flex-col sm:flex-row gap-4 p-4 border rounded-lg hover:border-[#3DD4A7] transition-colors cursor-pointer group"
-                            onClick={() => handleViewDetails(activity.id)}
-                            whileHover={{ scale: 1.01 }}
-                            transition={{ type: "spring", stiffness: 400, damping: 10 }}
-                          >
-                            <div className="sm:w-24 h-24 bg-gray-100 rounded-lg flex-shrink-0 overflow-hidden">
-                              {activity.photo ? (
-                                <img
-                                  src={activity.photo || "/placeholder.svg"}
-                                  alt={activity.name}
-                                  className="w-full h-full object-cover"
-                                />
-                              ) : (
-                                <div className="w-full h-full flex items-center justify-center">
-                                  <Calendar className="h-8 w-8 text-gray-400" />
-                                </div>
-                              )}
-                            </div>
-
-                            <div className="flex-1">
-                              <div className="flex flex-wrap gap-2 mb-2">
-                                {activity.type && (
-                                  <Badge variant="outline" className={getActivityTypeColor(activity.type)}>
-                                    {activity.type}
-                                  </Badge>
-                                )}
-                                {activity.category && (
-                                  <Badge variant="outline" className={getActivityCategoryColor(activity.category)}>
-                                    {activity.category}
-                                  </Badge>
-                                )}
-                                {registeredActivities.includes(activity.id) && (
-                                  <Badge className="bg-green-100 text-green-800 border-green-200">
-                                    <Check className="h-3 w-3 mr-1" />
-                                    Inscrito
-                                  </Badge>
-                                )}
-                              </div>
-
-                              <h3 className="font-semibold text-lg group-hover:text-[#3DD4A7] transition-colors">
-                                {activity.name}
-                              </h3>
-
-                              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-sm text-gray-600">
-                                <div className="flex items-center">
-                                  <Calendar className="h-4 w-4 mr-1" />
-                                  {formatDate(activity.activityDate)}
-                                </div>
-                                <div className="flex items-center">
-                                  <Clock className="h-4 w-4 mr-1" />
-                                  {activity.activityTime}
-                                </div>
-                                <div className="flex items-center">
-                                  <MapPin className="h-4 w-4 mr-1" />
-                                  {activity.location}
-                                </div>
-                              </div>
-                            </div>
-                          </motion.div>
+                            activity={activity}
+                            eventId={params.id}
+                            userRole={userRole}
+                            registeredActivities={registeredActivities}
+                            onRegister={handleRegistrationActivity}
+                            onRefresh={refreshEventData}
+                          />
                         ))}
                       </div>
                     </div>
@@ -896,10 +863,6 @@ export default function EventDetailsPage({ params }: PageProps) {
                               )}
                               key={option.value}
                               onClick={() => setActivityFilter(option.value)}
-                              className={cn(
-                                "cursor-pointer",
-                                activityFilter === option.value && "bg-[#e6f7f2] text-[#3DD4A7] font-medium",
-                              )}
                             >
                               {option.label}
                             </DropdownMenuItem>
@@ -911,105 +874,16 @@ export default function EventDetailsPage({ params }: PageProps) {
                     {filteredActivities.length > 0 ? (
                       <div className="space-y-6">
                         {(showAllActivities ? filteredActivities : filteredActivities.slice(0, 5)).map((activity) => (
-                          <motion.div
+                          <ActivityCard
                             key={activity.id}
-                            className="flex flex-col md:flex-row gap-4 p-4 border rounded-lg hover:border-[#3DD4A7] transition-colors"
-                            whileHover={{ scale: 1.01 }}
-                            transition={{ type: "spring", stiffness: 400, damping: 10 }}
-                          >
-                            <div className="md:w-32 h-32 bg-gray-100 rounded-lg flex-shrink-0 overflow-hidden">
-                              {activity.photo ? (
-                                <img
-                                  src={activity.photo || "/placeholder.svg"}
-                                  alt={activity.name}
-                                  className="w-full h-full object-cover"
-                                />
-                              ) : (
-                                <div className="w-full h-full flex items-center justify-center">
-                                  <Calendar className="h-10 w-10 text-gray-400" />
-                                </div>
-                              )}
-                            </div>
-
-                            <div className="flex-1">
-                              <div className="flex flex-wrap gap-2 mb-2">
-                                {activity.type && (
-                                  <Badge variant="outline" className={getActivityTypeColor(activity.type)}>
-                                    {activity.type}
-                                  </Badge>
-                                )}
-                                {activity.category && (
-                                  <Badge variant="outline" className={getActivityCategoryColor(activity.category)}>
-                                    {activity.category}
-                                  </Badge>
-                                )}
-                                {registeredActivities.includes(activity.id) && (
-                                  <Badge className="bg-green-100 text-green-800 border-green-200">
-                                    <Check className="h-3 w-3 mr-1" />
-                                    Inscrito
-                                  </Badge>
-                                )}
-                              </div>
-
-                              <h3 className="font-semibold text-lg">{activity.name}</h3>
-
-                              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-sm text-gray-600">
-                                <div className="flex items-center">
-                                  <Calendar className="h-4 w-4 mr-1" />
-                                  {formatDate(activity.activityDate)}
-                                </div>
-                                <div className="flex items-center">
-                                  <Clock className="h-4 w-4 mr-1" />
-                                  {activity.activityTime}
-                                </div>
-                                <div className="flex items-center">
-                                  <MapPin className="h-4 w-4 mr-1" />
-                                  {activity.location}
-                                </div>
-                              </div>
-
-                              <div className="flex flex-wrap gap-2 mt-4">
-                                <Button variant="outline" size="sm" onClick={() => handleViewDetails(activity.id)}>
-                                  <ExternalLink className="h-4 w-4 mr-2" />
-                                  Ver detalhes
-                                </Button>
-
-                                {(userRole === "user" || userRole === "client_user") &&
-                                  !registeredActivities.includes(activity.id) && (
-                                    <Button
-                                      size="sm"
-                                      className="bg-[#3DD4A7] hover:bg-[#2bc090]"
-                                      onClick={() => handleRegistrationActivity(activity.id)}
-                                      disabled={registeringActivity === activity.id}
-                                    >
-                                      {registeringActivity === activity.id ? (
-                                        <>
-                                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                          Inscrevendo...
-                                        </>
-                                      ) : (
-                                        <>
-                                          <Plus className="mr-2 h-4 w-4" />
-                                          Inscrever-se
-                                        </>
-                                      )}
-                                    </Button>
-                                  )}
-
-                                {(userRole === "admin" || userRole === "client_admin") && (
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="text-red-500 hover:text-red-700 hover:bg-red-50 border-red-200"
-                                    onClick={() => setDeleteActivityId(activity.id)}
-                                  >
-                                    <Trash2 className="h-4 w-4 mr-2" />
-                                    Excluir
-                                  </Button>
-                                )}
-                              </div>
-                            </div>
-                          </motion.div>
+                            activity={activity}
+                            eventId={params.id}
+                            userRole={userRole}
+                            registeredActivities={registeredActivities}
+                            onRegister={handleRegistrationActivity}
+                            onDelete={() => setDeleteActivityId(activity.id)}
+                            onRefresh={refreshEventData}
+                          />
                         ))}
 
                         {filteredActivities.length > 5 && (
@@ -1187,9 +1061,6 @@ export default function EventDetailsPage({ params }: PageProps) {
                               <Badge className="bg-green-100 text-green-800 px-3 py-1 text-xs rounded-full">
                                 Inscrito
                               </Badge>
-                              {userRegistrationId && (
-                                <span className="text-xs text-gray-500">ID: {userRegistrationId}</span>
-                              )}
                             </div>
                             <Button
                               className="w-full bg-red-500 hover:bg-red-600 h-12 text-base text-white"

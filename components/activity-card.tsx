@@ -1,13 +1,13 @@
 "use client"
 
 import { useState } from "react"
-import { Card, CardContent, CardFooter } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Calendar, Clock, MapPin, Tag, Trash2, Loader2, ExternalLink } from "lucide-react"
-import { format } from "date-fns"
-import { ptBR } from "date-fns/locale"
-import { toast } from "@/hooks/use-toast"
 import { useRouter } from "next/navigation"
+import { useToast } from "@/components/ui/use-toast"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { Calendar, Clock, MapPin, Plus, ExternalLink, Check, Trash2, Loader2, TicketIcon } from "lucide-react"
+import { formatDate } from "@/lib/utils"
+import { getAuthToken } from "@/lib/get-jwt"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,173 +17,272 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
-
-interface Activity {
-  id: number
-  name: string
-  location: string
-  date: string
-  time: string
-  type: string
-  category: string
-  image?: string
-}
+import { motion } from "framer-motion"
 
 interface ActivityCardProps {
-  activity: Activity
+  activity: any
   eventId: string
-  canDelete?: boolean
-  onDelete?: () => void
+  userRole: string
+  registeredActivities: number[]
+  onRegister: (activityId: number) => Promise<void>
+  onDelete?: (activityId: number) => void
+  onRefresh?: () => void
 }
 
-export function ActivityCard({ activity, eventId, canDelete = false, onDelete }: ActivityCardProps) {
-  const [isDeleting, setIsDeleting] = useState(false)
-  const router = useRouter()
+export default function ActivityCard({
+  activity,
+  eventId,
+  userRole,
+  registeredActivities,
+  onRegister,
+  onDelete,
+  onRefresh,
+}: ActivityCardProps) {
+  const [registeringActivity, setRegisteringActivity] = useState<boolean>(false)
+  const [showCancelDialog, setShowCancelDialog] = useState(false)
+  const [isCanceling, setIsCanceling] = useState(false)
 
-  const formatDate = (dateString: string) => {
-    return format(new Date(dateString), "dd 'de' MMMM 'de' yyyy")
+  const router = useRouter()
+  const { toast } = useToast()
+
+  const isRegistered = registeredActivities.includes(activity.id)
+
+  const handleViewDetails = () => {
+    router.push(`/events/${eventId}/activities/${activity.id}`)
   }
 
-  const handleDelete = async () => {
-    setIsDeleting(true)
-
+  const handleRegistration = async () => {
+    setRegisteringActivity(true)
     try {
-      const token = document.cookie
-        .split("; ")
-        .find((row) => row.startsWith("token="))
-        ?.split("=")[1]
-
-      if (!token) {
-        throw new Error("Usuário não autenticado")
-      }
-
-      const response = await fetch(
-        `/api/events/${eventId}/activities/${activity.id}`,
-        {
-          method: "DELETE",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
-      )
-
-      if (!response.ok) {
-        throw new Error("Falha ao excluir atividade")
-      }
-
-      toast({
-        title: "Atividade excluída",
-        description: "A atividade foi excluída com sucesso.",
-      })
-
-      if (onDelete) {
-        onDelete()
-      }
-    } catch (error) {
-      console.error("Erro ao excluir atividade:", error)
-      toast({
-        title: "Erro",
-        description: "Não foi possível excluir a atividade. Tente novamente.",
-        variant: "destructive",
-      })
+      await onRegister(activity.id)
     } finally {
-      setIsDeleting(false)
+      setRegisteringActivity(false)
     }
   }
 
-  const handleViewDetails = () => {
-    router.push(`/activities/${activity.id}`)
+  const handleCancelRegistration = async () => {
+    setIsCanceling(true)
+    try {
+      const token = getAuthToken()
+
+      if (!token) {
+        router.push("/")
+        return
+      }
+
+      const response = await fetch(`/api/activity-registrations/${activity.id}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "X-HTTP-Method-Override": "DELETE",
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error("Erro ao cancelar inscrição na atividade.")
+      }
+
+      toast({
+        title: "Sucesso!",
+        description: "Sua inscrição na atividade foi cancelada com sucesso.",
+      })
+
+      // Refresh the activity list
+      if (onRefresh) {
+        onRefresh()
+      }
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Erro",
+        description: error instanceof Error ? error.message : "Erro ao cancelar inscrição.",
+      })
+      console.error(error)
+    } finally {
+      setIsCanceling(false)
+      setShowCancelDialog(false)
+    }
+  }
+
+  const getActivityTypeColor = (type: string) => {
+    const typeColors: Record<string, string> = {
+      Palestra: "bg-blue-100 text-blue-800 border-blue-200",
+      Workshop: "bg-purple-100 text-purple-800 border-purple-200",
+      "Mesa Redonda": "bg-amber-100 text-amber-800 border-amber-200",
+      Curso: "bg-emerald-100 text-emerald-800 border-emerald-200",
+      Minicurso: "bg-teal-100 text-teal-800 border-teal-200",
+      Apresentação: "bg-indigo-100 text-indigo-800 border-indigo-200",
+    }
+
+    return typeColors[type] || "bg-gray-100 text-gray-800 border-gray-200"
+  }
+
+  const getActivityCategoryColor = (category: string) => {
+    const categoryColors: Record<string, string> = {
+      Computação: "bg-blue-50 text-blue-600 border-blue-100",
+      Redes: "bg-indigo-50 text-indigo-600 border-indigo-100",
+      Programação: "bg-violet-50 text-violet-600 border-violet-100",
+      Design: "bg-pink-50 text-pink-600 border-pink-100",
+      Inovação: "bg-amber-50 text-amber-600 border-amber-100",
+      Empreendedorismo: "bg-emerald-50 text-emerald-600 border-emerald-100",
+    }
+
+    return categoryColors[category] || "bg-gray-50 text-gray-600 border-gray-100"
   }
 
   return (
-    <Card className="overflow-hidden">
-      <div className="relative h-48 w-full cursor-pointer" onClick={handleViewDetails}>
-        <img
-          src={activity.image || "/placeholder.svg?height=200&width=300"}
-          alt={activity.name}
-          className="h-full w-full object-cover transition-transform hover:scale-105"
-        />
-      </div>
-
-      <CardContent className="p-4">
-        <h3
-          className="text-xl font-semibold mb-2 cursor-pointer hover:text-[#3DD4A7] transition-colors"
-          onClick={handleViewDetails}
-        >
-          {activity.name}
-        </h3>
-
-        <div className="space-y-2 text-sm">
-          <div className="flex items-center gap-2">
-            <Calendar className="h-4 w-4 text-gray-500" />
-            <span>{formatDate(activity.date)}</span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Clock className="h-4 w-4 text-gray-500" />
-            <span>{activity.time}</span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <MapPin className="h-4 w-4 text-gray-500" />
-            <span>{activity.location}</span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Tag className="h-4 w-4 text-gray-500" />
-            <span>{activity.category}</span>
-          </div>
+    <>
+      <motion.div
+        className="flex flex-col md:flex-row gap-4 p-4 border rounded-lg hover:border-[#3DD4A7] transition-colors"
+        whileHover={{ scale: 1.01 }}
+        transition={{ type: "spring", stiffness: 400, damping: 10 }}
+      >
+        <div className="md:w-32 h-32 bg-gray-100 rounded-lg flex-shrink-0 overflow-hidden">
+          {activity.photo ? (
+            <img
+              src={activity.photo || "/placeholder.svg"}
+              alt={activity.name}
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center">
+              <Calendar className="h-10 w-10 text-gray-400" />
+            </div>
+          )}
         </div>
-      </CardContent>
 
-      <CardFooter className="p-4 pt-0 flex flex-wrap gap-2 justify-end">
-        <Button variant="outline" size="sm" onClick={handleViewDetails}>
-          <ExternalLink className="h-4 w-4 mr-2" />
-          Detalhes
-        </Button>
+        <div className="flex-1">
+          <div className="flex flex-wrap gap-2 mb-2">
+            {activity.type && (
+              <Badge variant="outline" className={getActivityTypeColor(activity.type)}>
+                {activity.type}
+              </Badge>
+            )}
+            {activity.category && (
+              <Badge variant="outline" className={getActivityCategoryColor(activity.category)}>
+                {activity.category}
+              </Badge>
+            )}
+            {isRegistered && (
+              <Badge className="bg-green-100 text-green-800 border-green-200">
+                <Check className="h-3 w-3 mr-1" />
+                Inscrito
+              </Badge>
+            )}
+          </div>
 
-        {canDelete && (
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="outline" size="sm" className="text-red-500 border-red-200">
+          <h3 className="font-semibold text-lg">{activity.name}</h3>
+
+          <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-sm text-gray-600">
+            <div className="flex items-center">
+              <Calendar className="h-4 w-4 mr-1" />
+              {formatDate(activity.activityDate)}
+            </div>
+            <div className="flex items-center">
+              <Clock className="h-4 w-4 mr-1" />
+              {activity.activityTime}
+            </div>
+            <div className="flex items-center">
+              <MapPin className="h-4 w-4 mr-1" />
+              {activity.location}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2 mt-4">
+            <Button variant="outline" size="sm" onClick={handleViewDetails}>
+              <ExternalLink className="h-4 w-4 mr-2" />
+              Ver detalhes
+            </Button>
+
+            {(userRole === "user" || userRole === "client_user") && !isRegistered && (
+              <Button
+                size="sm"
+                className="bg-[#3DD4A7] hover:bg-[#2bc090]"
+                onClick={handleRegistration}
+                disabled={registeringActivity}
+              >
+                {registeringActivity ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Inscrevendo...
+                  </>
+                ) : (
+                  <>
+                    <TicketIcon className="mr-2 h-4 w-4" />
+                    Inscrever-se
+                  </>
+                )}
+              </Button>
+            )}
+
+            {(userRole === "user" || userRole === "client_user") && isRegistered && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-red-200 text-red-500 hover:bg-red-50 hover:text-red-600"
+                onClick={() => setShowCancelDialog(true)}
+                disabled={isCanceling}
+              >
+                {isCanceling ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Cancelando...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Cancelar inscrição
+                  </>
+                )}
+              </Button>
+            )}
+
+            {(userRole === "admin" || userRole === "client_admin") && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-red-500 hover:text-red-700 hover:bg-red-50 border-red-200"
+                onClick={() => onDelete && onDelete(activity.id)}
+              >
                 <Trash2 className="h-4 w-4 mr-2" />
                 Excluir
               </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Excluir atividade</AlertDialogTitle>
-                <AlertDialogDescription>
-                  Tem certeza que deseja excluir esta atividade? Esta ação não pode ser desfeita.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                <AlertDialogAction
-                  onClick={(e) => {
-                    e.preventDefault()
-                    handleDelete()
-                  }}
-                  disabled={isDeleting}
-                  className="bg-red-500 hover:bg-red-600"
-                >
-                  {isDeleting ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Excluindo...
-                    </>
-                  ) : (
-                    "Sim, excluir"
-                  )}
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        )}
-      </CardFooter>
-    </Card>
+            )}
+          </div>
+        </div>
+      </motion.div>
+
+      {/* Diálogo de confirmação para cancelar inscrição */}
+      <AlertDialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirmar cancelamento</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja cancelar sua inscrição nesta atividade? Esta ação não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isCanceling}>Voltar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleCancelRegistration}
+              disabled={isCanceling}
+              className="bg-red-500 hover:bg-red-600"
+            >
+              {isCanceling ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Cancelando...
+                </>
+              ) : (
+                "Confirmar cancelamento"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   )
 }
 
